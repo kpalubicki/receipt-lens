@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from receipt_lens.config import settings
 from receipt_lens.parser import parse_receipt
@@ -46,3 +49,28 @@ async def parse(file: UploadFile = File(...)) -> ParseResponse:
         raise HTTPException(status_code=502, detail=f"Model error: {e}") from e
 
     return result
+
+
+@app.post("/export/csv")
+def export_csv(result: ParseResponse) -> Response:
+    """Return receipt items as a downloadable CSV file."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["name", "quantity", "unit_price", "total_price"])
+    for item in result.receipt.items:
+        writer.writerow([item.name, item.quantity, item.unit_price, item.total_price])
+    writer.writerow([])
+    if result.receipt.subtotal is not None:
+        writer.writerow(["subtotal", "", "", result.receipt.subtotal])
+    if result.receipt.tax is not None:
+        writer.writerow(["tax", "", "", result.receipt.tax])
+    if result.receipt.total is not None:
+        writer.writerow(["total", "", "", result.receipt.total])
+
+    store = (result.receipt.store_name or "receipt").lower().replace(" ", "-")
+    filename = f"{store}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

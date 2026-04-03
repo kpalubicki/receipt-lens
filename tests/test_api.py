@@ -79,3 +79,54 @@ def test_parse_model_error_returns_502():
         )
     assert response.status_code == 502
     assert "model offline" in response.json()["detail"]
+
+
+# --- /export/csv tests ---
+
+EXPORT_PAYLOAD = {
+    "receipt": {
+        "store_name": "SuperMart",
+        "date": "2026-04-01",
+        "items": [
+            {"name": "Milk", "quantity": 2, "unit_price": 1.5, "total_price": 3.0},
+            {"name": "Bread", "quantity": 1, "unit_price": 2.5, "total_price": 2.5},
+        ],
+        "subtotal": 5.5,
+        "tax": 0.44,
+        "total": 5.94,
+        "currency": "USD",
+    },
+    "model": "llava:7b",
+    "confidence": "high",
+}
+
+
+def test_export_csv_returns_file():
+    r = client.post("/export/csv", json=EXPORT_PAYLOAD)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "supermart.csv" in r.headers["content-disposition"]
+
+
+def test_export_csv_contains_items():
+    r = client.post("/export/csv", json=EXPORT_PAYLOAD)
+    assert "Milk" in r.text
+    assert "Bread" in r.text
+    assert "1.5" in r.text
+    assert "2.5" in r.text
+
+
+def test_export_csv_contains_totals():
+    r = client.post("/export/csv", json=EXPORT_PAYLOAD)
+    assert "subtotal" in r.text
+    assert "5.5" in r.text
+    assert "tax" in r.text
+    assert "total" in r.text
+    assert "5.94" in r.text
+
+
+def test_export_csv_no_store_name():
+    payload = {**EXPORT_PAYLOAD, "receipt": {**EXPORT_PAYLOAD["receipt"], "store_name": None}}
+    r = client.post("/export/csv", json=payload)
+    assert r.status_code == 200
+    assert "receipt.csv" in r.headers["content-disposition"]
