@@ -7,6 +7,7 @@ import io
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from receipt_lens.config import settings
 from receipt_lens.parser import parse_receipt
@@ -49,6 +50,65 @@ async def parse(file: UploadFile = File(...)) -> ParseResponse:
         raise HTTPException(status_code=502, detail=f"Model error: {e}") from e
 
     return result
+
+
+class BatchParseResult(BaseModel):
+    filename: str
+    result: ParseResponse | None = None
+    error: str | None = None
+
+
+class BatchParseResponse(BaseModel):
+    results: list[BatchParseResult]
+    total: int
+    succeeded: int
+    failed: int
+
+
+@app.post("/parse/batch", response_model=BatchParseResponse)
+async def parse_batch(files: list[UploadFile] = File(...)) -> BatchParseResponse:
+    """Upload multiple receipt images and get back structured data for each."""
+    if not files:
+        raise HTTPException(status_code=422, detail="At least one file is required.")
+    if len(files) > settings.max_batch_files:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many files. Maximum is {settings.max_batch_files}.",
+        )
+
+    max_bytes = settings.max_image_size_mb * 1024 * 1024
+    results: list[BatchParseResult] = []
+
+    for upload in files:
+        filename = upload.filename or "unknown"
+        if upload.content_type not in SUPPORTED_TYPES:
+            results.append(BatchParseResult(
+                filename=filename,
+                error=f"Unsupported file type '{upload.content_type}'.",
+            ))
+            continue
+
+        image_bytes = await upload.read()
+        if len(image_bytes) > max_bytes:
+            results.append(BatchParseResult(
+                filename=filename,
+                error=f"File too large. Maximum size is {settings.max_image_size_mb} MB.",
+            ))
+            continue
+
+        try:
+            parsed = parse_receipt(image_bytes)
+            results.append(BatchParseResult(filename=filename, result=parsed))
+        except Exception as e:
+            results.append(BatchParseResult(filename=filename, error=str(e)))
+
+    succeeded = sum(1 for r in results if r.result is not None)
+    return BatchParseResponse(
+        results=results,
+        total=len(results),
+        succeeded=succeeded,
+        failed=len(results) - succeeded,
+    )
 
 
 @app.post("/export/csv")

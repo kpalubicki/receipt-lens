@@ -130,3 +130,61 @@ def test_export_csv_no_store_name():
     r = client.post("/export/csv", json=payload)
     assert r.status_code == 200
     assert "receipt.csv" in r.headers["content-disposition"]
+
+
+# --- /parse/batch tests ---
+
+def test_batch_parse_two_files():
+    img = _make_image()
+    with patch("receipt_lens.main.parse_receipt", return_value=_mock_parse()):
+        r = client.post(
+            "/parse/batch",
+            files=[
+                ("files", ("a.jpg", img, "image/jpeg")),
+                ("files", ("b.jpg", img, "image/jpeg")),
+            ],
+        )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 2
+    assert data["succeeded"] == 2
+    assert data["failed"] == 0
+
+
+def test_batch_parse_partial_failure():
+    img = _make_image()
+
+    def failing_parse(b):
+        raise RuntimeError("model offline")
+
+    with patch("receipt_lens.main.parse_receipt", side_effect=failing_parse):
+        r = client.post(
+            "/parse/batch",
+            files=[("files", ("a.jpg", img, "image/jpeg"))],
+        )
+    data = r.json()
+    assert data["failed"] == 1
+    assert "model offline" in data["results"][0]["error"]
+
+
+def test_batch_parse_unsupported_type():
+    img = _make_image()
+    r = client.post(
+        "/parse/batch",
+        files=[
+            ("files", ("a.jpg", img, "image/jpeg")),
+            ("files", ("doc.pdf", b"pdf", "application/pdf")),
+        ],
+    )
+    data = r.json()
+    assert data["succeeded"] == 0 or data["failed"] >= 1
+    errors = [res for res in data["results"] if res["error"]]
+    assert any("Unsupported" in e["error"] for e in errors)
+
+
+def test_batch_parse_too_many_files():
+    img = _make_image()
+    files = [("files", (f"r{i}.jpg", img, "image/jpeg")) for i in range(11)]
+    r = client.post("/parse/batch", files=files)
+    assert r.status_code == 422
+    assert "Too many" in r.json()["detail"]
