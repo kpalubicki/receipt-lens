@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     max_image_size_mb: int = 10
     max_batch_files: int = 10
     app_port: int = 8001
+    history_db: str = "./data/history.db"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

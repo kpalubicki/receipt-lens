@@ -188,3 +188,51 @@ def test_batch_parse_too_many_files():
     r = client.post("/parse/batch", files=files)
     assert r.status_code == 422
     assert "Too many" in r.json()["detail"]
+
+
+# --- /history tests ---
+
+def test_history_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr("receipt_lens.main.settings",
+        type("S", (), {"vision_model": "llava:7b", "max_image_size_mb": 10,
+                       "max_batch_files": 10, "history_db": str(tmp_path / "h.db")})())
+    monkeypatch.setattr("receipt_lens.history.settings",
+        type("S", (), {"history_db": str(tmp_path / "h.db")})())
+    r = client.get("/history")
+    assert r.status_code == 200
+    assert r.json()["scans"] == []
+    assert r.json()["count"] == 0
+
+
+def test_history_saved_after_parse(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    img = _make_image()
+    with patch("receipt_lens.main.parse_receipt", return_value=_mock_parse("Lidl", 22.5)):
+        client.post("/parse", files={"file": ("lidl.jpg", img, "image/jpeg")})
+
+    from receipt_lens import history as h
+    rows = h.list_scans()
+    assert len(rows) == 1
+    assert rows[0]["store"] == "Lidl"
+
+
+def test_history_get_item(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    mock = _mock_parse("Biedronka", 10.0)
+    scan_id = h.save_scan("b.jpg", mock)
+    row = h.get_scan(scan_id)
+    assert row is not None
+    assert row["store"] == "Biedronka"
+
+
+def test_history_delete_item(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    mock = _mock_parse("Aldi", 5.0)
+    scan_id = h.save_scan("a.jpg", mock)
+    assert h.delete_scan(scan_id) is True
+    assert h.get_scan(scan_id) is None

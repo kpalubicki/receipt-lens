@@ -10,8 +10,9 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from receipt_lens.config import settings
+from receipt_lens.history import delete_scan, get_scan, list_scans, save_scan
 from receipt_lens.parser import parse_receipt
-from receipt_lens.schemas import ParseResponse
+from receipt_lens.schemas import HistoryResponse, ParseResponse, ScanSummary
 
 SUPPORTED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
 
@@ -49,6 +50,7 @@ async def parse(file: UploadFile = File(...)) -> ParseResponse:
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Model error: {e}") from e
 
+    save_scan(file.filename or "unknown", result)
     return result
 
 
@@ -98,6 +100,7 @@ async def parse_batch(files: list[UploadFile] = File(...)) -> BatchParseResponse
 
         try:
             parsed = parse_receipt(image_bytes)
+            save_scan(filename, parsed)
             results.append(BatchParseResult(filename=filename, result=parsed))
         except Exception as e:
             results.append(BatchParseResult(filename=filename, error=str(e)))
@@ -109,6 +112,30 @@ async def parse_batch(files: list[UploadFile] = File(...)) -> BatchParseResponse
         succeeded=succeeded,
         failed=len(results) - succeeded,
     )
+
+
+@app.get("/history", response_model=HistoryResponse)
+def get_history(limit: int = 50, offset: int = 0) -> HistoryResponse:
+    """List past receipt scans, newest first."""
+    rows = list_scans(limit=limit, offset=offset)
+    scans = [ScanSummary(**r) for r in rows]
+    return HistoryResponse(scans=scans, count=len(scans))
+
+
+@app.get("/history/{scan_id}")
+def get_history_item(scan_id: int) -> dict:
+    """Get full details of a single past scan including parsed receipt data."""
+    scan = get_scan(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found.")
+    return scan
+
+
+@app.delete("/history/{scan_id}", status_code=204, response_model=None)
+def delete_history_item(scan_id: int) -> None:
+    """Delete a scan from history."""
+    if not delete_scan(scan_id):
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found.")
 
 
 @app.post("/export/csv")

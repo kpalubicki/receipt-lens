@@ -23,3 +23,20 @@ class ParseResponse(BaseModel):
     receipt: ReceiptData
     model: str
     confidence: str  # "high" | "medium" | "low"
+
+
+class ScanSummary(BaseModel):
+    id: int
+    filename: str
+    scanned_at: str
+    store: str | None
+    date: str | None
+    total: float | None
+    currency: str | None
+    confidence: str | None
+    model: str | None
+
+
+class HistoryResponse(BaseModel):
+    scans: list[ScanSummary]
+    count: int
