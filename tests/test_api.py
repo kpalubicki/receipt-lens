@@ -132,6 +132,43 @@ def test_export_csv_no_store_name():
     assert "receipt.csv" in r.headers["content-disposition"]
 
 
+# --- /export/pdf tests ---
+
+def test_export_pdf_returns_pdf():
+    r = client.post("/export/pdf", json=EXPORT_PAYLOAD)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"
+
+
+def test_export_pdf_filename_uses_store_and_date():
+    r = client.post("/export/pdf", json=EXPORT_PAYLOAD)
+    cd = r.headers["content-disposition"]
+    assert "supermart" in cd
+    assert "2026-04-01" in cd
+    assert ".pdf" in cd
+
+
+def test_export_pdf_no_store_name():
+    payload = {**EXPORT_PAYLOAD, "receipt": {**EXPORT_PAYLOAD["receipt"], "store_name": None}}
+    r = client.post("/export/pdf", json=payload)
+    assert r.status_code == 200
+    assert "receipt" in r.headers["content-disposition"]
+
+
+def test_export_pdf_no_items():
+    payload = {**EXPORT_PAYLOAD, "receipt": {**EXPORT_PAYLOAD["receipt"], "items": []}}
+    r = client.post("/export/pdf", json=payload)
+    assert r.status_code == 200
+    assert r.content[:4] == b"%PDF"
+
+
+def test_export_pdf_501_when_fpdf2_missing():
+    with patch("receipt_lens.main.generate_pdf", side_effect=ImportError("fpdf2 not installed")):
+        r = client.post("/export/pdf", json=EXPORT_PAYLOAD)
+    assert r.status_code == 501
+
+
 # --- /parse/batch tests ---
 
 def test_batch_parse_two_files():

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from receipt_lens.config import settings
 from receipt_lens.history import delete_scan, get_scan, list_scans, save_scan
 from receipt_lens.parser import parse_receipt
+from receipt_lens.pdf import generate_pdf
 from receipt_lens.schemas import HistoryResponse, ParseResponse, ScanSummary
 
 SUPPORTED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
@@ -136,6 +137,24 @@ def delete_history_item(scan_id: int) -> None:
     """Delete a scan from history."""
     if not delete_scan(scan_id):
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found.")
+
+
+@app.post("/export/pdf")
+def export_pdf(result: ParseResponse) -> Response:
+    """Return a formatted PDF of the receipt."""
+    try:
+        pdf_bytes = generate_pdf(result)
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+
+    store = (result.receipt.store_name or "receipt").lower().replace(" ", "-")[:40]
+    date = ("-" + result.receipt.date.replace("/", "-").replace(" ", "-")) if result.receipt.date else ""
+    filename = f"{store}{date}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/export/csv")
