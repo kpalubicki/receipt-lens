@@ -22,9 +22,9 @@ def _make_image(fmt: str = "JPEG") -> bytes:
     return buf.getvalue()
 
 
-def _mock_parse(store="Biedronka", total=12.89):
+def _mock_parse(store="Biedronka", total=12.89, date=None, currency=None):
     return ParseResponse(
-        receipt=ReceiptData(store_name=store, total=total, items=[]),
+        receipt=ReceiptData(store_name=store, total=total, items=[], date=date, currency=currency),
         model="llava:7b",
         confidence="high",
     )
@@ -225,6 +225,65 @@ def test_batch_parse_too_many_files():
     r = client.post("/parse/batch", files=files)
     assert r.status_code == 422
     assert "Too many" in r.json()["detail"]
+
+
+# --- /analytics tests ---
+
+def test_analytics_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr("receipt_lens.history.settings",
+                        type("S", (), {"history_db": str(tmp_path / "h.db")})())
+    r = client.get("/analytics")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["scan_count"] == 0
+    assert data["total_spent"] == 0.0
+    assert data["by_store"] == {}
+    assert data["by_month"] == {}
+
+
+def test_analytics_totals(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    h.save_scan("a.jpg", _mock_parse("Lidl", 22.50, date="2026-04-10"))
+    h.save_scan("b.jpg", _mock_parse("Lidl", 10.00, date="2026-04-15"))
+    h.save_scan("c.jpg", _mock_parse("Biedronka", 35.00, date="2026-05-02"))
+
+    r = client.get("/analytics")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total_spent"] == pytest.approx(67.50)
+    assert data["receipts_with_total"] == 3
+    assert data["by_store"]["Lidl"] == pytest.approx(32.50)
+    assert data["by_store"]["Biedronka"] == pytest.approx(35.00)
+    assert "2026-04" in data["by_month"]
+    assert "2026-05" in data["by_month"]
+
+
+def test_analytics_by_store_sorted_descending(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    h.save_scan("a.jpg", _mock_parse("Cheap", 5.00))
+    h.save_scan("b.jpg", _mock_parse("Expensive", 100.00))
+
+    r = client.get("/analytics")
+    stores = list(r.json()["by_store"].keys())
+    assert stores[0] == "Expensive"
+
+
+def test_analytics_currency_filter(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    h.save_scan("a.jpg", _mock_parse("USD-store", 50.00, currency="USD"))
+    h.save_scan("b.jpg", _mock_parse("EUR-store", 30.00, currency="EUR"))
+
+    r = client.get("/analytics?currency=USD")
+    data = r.json()
+    assert data["total_spent"] == pytest.approx(50.00)
+    assert "USD-store" in data["by_store"]
+    assert "EUR-store" not in data["by_store"]
 
 
 # --- /history tests ---

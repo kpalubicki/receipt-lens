@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from receipt_lens.config import settings
-from receipt_lens.history import delete_scan, get_scan, list_scans, save_scan
+from receipt_lens.history import delete_scan, get_scan, list_scans, save_scan, spending_analytics
 from receipt_lens.parser import parse_receipt
 from receipt_lens.pdf import generate_pdf
 from receipt_lens.schemas import HistoryResponse, ParseResponse, ScanSummary
@@ -130,6 +130,17 @@ def get_history_item(scan_id: int) -> dict:
     if scan is None:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found.")
     return scan
+
+
+@app.get("/analytics")
+def get_analytics(currency: str | None = None) -> JSONResponse:
+    """Return spending analytics derived from scan history.
+
+    Pass ?currency=USD to restrict totals to a single currency.
+    Returns total spent, breakdown by store, and breakdown by month.
+    """
+    data = spending_analytics(currency=currency)
+    return JSONResponse(content=data)
 
 
 @app.delete("/history/{scan_id}", status_code=204, response_model=None)

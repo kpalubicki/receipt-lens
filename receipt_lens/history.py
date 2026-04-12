@@ -84,6 +84,72 @@ def get_scan(scan_id: int) -> dict | None:
         return result
 
 
+def spending_analytics(currency: str | None = None) -> dict[str, Any]:
+    """Return spending analytics derived from saved scans.
+
+    Includes:
+    - total_spent: sum of all receipt totals (optionally filtered by currency)
+    - by_store: {store_name: total_spent} sorted descending
+    - by_month: {YYYY-MM: total_spent} sorted chronologically
+    - scan_count: total number of scans in history
+    - receipts_with_total: how many scans had a parseable total
+    """
+    with _conn() as conn:
+        _ensure_table(conn)
+        if currency:
+            rows = conn.execute(
+                "SELECT store, date, total, currency FROM scans WHERE total IS NOT NULL AND UPPER(currency) = UPPER(?)",
+                (currency,),
+            ).fetchall()
+            scan_count = conn.execute(
+                "SELECT COUNT(*) FROM scans WHERE UPPER(currency) = UPPER(?)", (currency,)
+            ).fetchone()[0]
+        else:
+            rows = conn.execute(
+                "SELECT store, date, total, currency FROM scans WHERE total IS NOT NULL"
+            ).fetchall()
+            scan_count = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+
+    total_spent = 0.0
+    by_store: dict[str, float] = {}
+    by_month: dict[str, float] = {}
+
+    for row in rows:
+        store = row["store"] or "Unknown"
+        total = row["total"] or 0.0
+        date_str = row["date"] or ""
+
+        total_spent += total
+        by_store[store] = round(by_store.get(store, 0.0) + total, 2)
+
+        # Try to extract YYYY-MM from various date formats
+        month_key = _extract_month(date_str)
+        if month_key:
+            by_month[month_key] = round(by_month.get(month_key, 0.0) + total, 2)
+
+    return {
+        "scan_count": scan_count,
+        "receipts_with_total": len(rows),
+        "total_spent": round(total_spent, 2),
+        "by_store": dict(sorted(by_store.items(), key=lambda x: -x[1])),
+        "by_month": dict(sorted(by_month.items())),
+    }
+
+
+def _extract_month(date_str: str) -> str | None:
+    """Try to extract YYYY-MM from a date string."""
+    import re
+    # ISO: 2026-04-25
+    m = re.search(r"(\d{4})-(\d{2})", date_str)
+    if m:
+        return f"{m[1]}-{m[2]}"
+    # DD/MM/YYYY or MM/DD/YYYY — take the year + last two-digit group as month guess
+    m = re.search(r"(\d{1,2})[/.](\d{1,2})[/.](\d{4})", date_str)
+    if m:
+        return f"{m[3]}-{int(m[2]):02d}"
+    return None
+
+
 def delete_scan(scan_id: int) -> bool:
     """Delete a scan. Returns True if it existed."""
     with _conn() as conn:
