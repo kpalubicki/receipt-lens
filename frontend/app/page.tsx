@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
-import { Upload, Receipt, AlertCircle, Loader2, X } from "lucide-react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { Upload, Receipt, AlertCircle, Loader2, X, Bell, BellOff } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
@@ -29,6 +29,19 @@ interface ParseResult {
   confidence: string;
 }
 
+interface BudgetAlert {
+  month: string;
+  spent: number;
+  over_by: number;
+}
+
+interface BudgetAlertResult {
+  threshold: number;
+  currency: string | null;
+  alerts: BudgetAlert[];
+  ok: boolean;
+}
+
 type State =
   | { status: "idle" }
   | { status: "loading" }
@@ -51,6 +64,101 @@ function Row({ label, value, bold }: { label: string; value: string | null | und
     <div className="flex justify-between text-sm">
       <span className="text-gray-500">{label}</span>
       <span className={bold ? "text-white font-semibold" : "text-gray-300"}>{value || "—"}</span>
+    </div>
+  );
+}
+
+function BudgetAlertPanel() {
+  const [threshold, setThreshold] = useState("500");
+  const [currency, setCurrency] = useState("");
+  const [result, setResult] = useState<BudgetAlertResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function check() {
+    const t = parseFloat(threshold);
+    if (!t || t <= 0) { setError("Enter a valid threshold."); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ threshold: String(t) });
+      if (currency.trim()) params.set("currency", currency.trim().toUpperCase());
+      const res = await fetch(`${API}/analytics/budget-alert?${params}`);
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      setResult(await res.json());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // auto-check on mount with defaults
+  useEffect(() => { check(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="border border-gray-800 rounded-xl p-5 bg-gray-900 space-y-4">
+      <h2 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+        <Bell className="w-4 h-4 text-indigo-400" />
+        Budget Alert
+      </h2>
+      <div className="flex gap-3 items-end">
+        <div className="flex-1">
+          <label className="text-xs text-gray-500 mb-1 block">Monthly limit</label>
+          <input
+            type="number"
+            min="1"
+            value={threshold}
+            onChange={(e) => setThreshold(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+        <div className="w-28">
+          <label className="text-xs text-gray-500 mb-1 block">Currency (opt.)</label>
+          <input
+            type="text"
+            placeholder="USD"
+            maxLength={5}
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+        <button
+          onClick={check}
+          disabled={loading}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Check"}
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-red-400 text-xs flex items-center gap-2">
+          <AlertCircle className="w-3.5 h-3.5" /> {error}
+        </p>
+      )}
+
+      {result && !loading && (
+        result.ok ? (
+          <div className="flex items-center gap-2 text-green-400 text-sm">
+            <BellOff className="w-4 h-4" />
+            No months exceeded the {result.threshold} limit.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {result.alerts.map((a) => (
+              <div key={a.month} className="flex justify-between items-center text-sm bg-red-950/50 border border-red-800/50 rounded-lg px-3 py-2">
+                <span className="text-gray-300">{a.month}</span>
+                <div className="text-right">
+                  <span className="text-red-400 font-medium">{a.spent.toFixed(2)}</span>
+                  <span className="text-gray-500 text-xs ml-2">+{a.over_by.toFixed(2)} over</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
     </div>
   );
 }
@@ -158,6 +266,10 @@ export default function Home() {
           <p className="text-red-300 text-sm">{state.message}</p>
         </div>
       )}
+
+      <div className="mt-8">
+        <BudgetAlertPanel />
+      </div>
 
       {state.status === "done" && (
         <div className="space-y-6">

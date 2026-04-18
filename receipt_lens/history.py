@@ -150,6 +150,32 @@ def _extract_month(date_str: str) -> str | None:
     return None
 
 
+def budget_alert(threshold: float, currency: str | None = None) -> dict[str, Any]:
+    """Return months where spending exceeded the given threshold.
+
+    Returns:
+    - threshold: the value used
+    - currency: filter applied (or None for all)
+    - alerts: list of {month, spent, over_by} for months above threshold
+    - ok: True if no month exceeded the threshold
+    """
+    analytics = spending_analytics(currency=currency)
+    alerts = []
+    for month, spent in analytics["by_month"].items():
+        if spent > threshold:
+            alerts.append({
+                "month": month,
+                "spent": spent,
+                "over_by": round(spent - threshold, 2),
+            })
+    return {
+        "threshold": threshold,
+        "currency": currency,
+        "alerts": sorted(alerts, key=lambda x: x["month"]),
+        "ok": len(alerts) == 0,
+    }
+
+
 def delete_scan(scan_id: int) -> bool:
     """Delete a scan. Returns True if it existed."""
     with _conn() as conn:

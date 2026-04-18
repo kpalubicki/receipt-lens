@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from receipt_lens.config import settings
-from receipt_lens.history import delete_scan, get_scan, list_scans, save_scan, spending_analytics
+from receipt_lens.history import budget_alert, delete_scan, get_scan, list_scans, save_scan, spending_analytics
 from receipt_lens.parser import parse_receipt
 from receipt_lens.pdf import generate_pdf
 from receipt_lens.schemas import HistoryResponse, ParseResponse, ScanSummary
@@ -140,6 +140,19 @@ def get_analytics(currency: str | None = None) -> JSONResponse:
     Returns total spent, breakdown by store, and breakdown by month.
     """
     data = spending_analytics(currency=currency)
+    return JSONResponse(content=data)
+
+
+@app.get("/analytics/budget-alert")
+def get_budget_alert(threshold: float, currency: str | None = None) -> JSONResponse:
+    """Return months where spending exceeded the threshold.
+
+    Pass ?threshold=500 to set the monthly limit.
+    Optionally filter by ?currency=USD.
+    """
+    if threshold <= 0:
+        raise HTTPException(status_code=422, detail="threshold must be greater than 0.")
+    data = budget_alert(threshold=threshold, currency=currency)
     return JSONResponse(content=data)
 
 

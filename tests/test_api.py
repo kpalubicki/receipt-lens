@@ -332,3 +332,62 @@ def test_history_delete_item(tmp_path, monkeypatch):
     scan_id = h.save_scan("a.jpg", mock)
     assert h.delete_scan(scan_id) is True
     assert h.get_scan(scan_id) is None
+
+
+# --- /analytics/budget-alert tests ---
+
+def test_budget_alert_no_data(tmp_path, monkeypatch):
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": str(tmp_path / "h.db")})())
+    r = client.get("/analytics/budget-alert?threshold=100")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["alerts"] == []
+
+
+def test_budget_alert_under_threshold(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    h.save_scan("a.jpg", _mock_parse("Lidl", 40.00, date="2026-04-10"))
+    h.save_scan("b.jpg", _mock_parse("Lidl", 30.00, date="2026-04-15"))
+
+    r = client.get("/analytics/budget-alert?threshold=200")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["alerts"] == []
+
+
+def test_budget_alert_over_threshold(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    h.save_scan("a.jpg", _mock_parse("Lidl", 300.00, date="2026-04-10"))
+    h.save_scan("b.jpg", _mock_parse("Biedronka", 50.00, date="2026-05-02"))
+
+    r = client.get("/analytics/budget-alert?threshold=200")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert len(data["alerts"]) == 1
+    assert data["alerts"][0]["month"] == "2026-04"
+    assert data["alerts"][0]["over_by"] == pytest.approx(100.0)
+
+
+def test_budget_alert_invalid_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": str(tmp_path / "h.db")})())
+    r = client.get("/analytics/budget-alert?threshold=0")
+    assert r.status_code == 422
+
+
+def test_budget_alert_currency_filter(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings", type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    h.save_scan("a.jpg", _mock_parse("USD-store", 300.00, date="2026-04-10", currency="USD"))
+    h.save_scan("b.jpg", _mock_parse("EUR-store", 50.00, date="2026-04-10", currency="EUR"))
+
+    r = client.get("/analytics/budget-alert?threshold=100&currency=EUR")
+    data = r.json()
+    assert data["ok"] is True
