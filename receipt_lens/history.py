@@ -30,9 +30,15 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
             currency TEXT,
             confidence TEXT,
             model    TEXT,
+            category TEXT,
             data     TEXT NOT NULL
         )
     """)
+    # add category column to existing DBs that predate this field
+    try:
+        conn.execute("ALTER TABLE scans ADD COLUMN category TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
 
 
@@ -43,8 +49,8 @@ def save_scan(filename: str, result: Any) -> int:
         _ensure_table(conn)
         cur = conn.execute(
             """INSERT INTO scans
-               (filename, scanned_at, store, date, total, currency, confidence, model, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (filename, scanned_at, store, date, total, currency, confidence, model, category, data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 filename,
                 datetime.now(timezone.utc).isoformat(),
@@ -54,6 +60,7 @@ def save_scan(filename: str, result: Any) -> int:
                 receipt.currency,
                 result.confidence,
                 result.model,
+                receipt.category,
                 result.model_dump_json(),
             ),
         )
@@ -65,7 +72,7 @@ def list_scans(limit: int = 50, offset: int = 0) -> list[dict]:
     with _conn() as conn:
         _ensure_table(conn)
         rows = conn.execute(
-            "SELECT id, filename, scanned_at, store, date, total, currency, confidence, model "
+            "SELECT id, filename, scanned_at, store, date, total, currency, confidence, model, category "
             "FROM scans ORDER BY id DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
@@ -91,6 +98,7 @@ def spending_analytics(currency: str | None = None) -> dict[str, Any]:
     - total_spent: sum of all receipt totals (optionally filtered by currency)
     - by_store: {store_name: total_spent} sorted descending
     - by_month: {YYYY-MM: total_spent} sorted chronologically
+    - by_category: {category: total_spent} sorted descending
     - scan_count: total number of scans in history
     - receipts_with_total: how many scans had a parseable total
     """
@@ -98,7 +106,7 @@ def spending_analytics(currency: str | None = None) -> dict[str, Any]:
         _ensure_table(conn)
         if currency:
             rows = conn.execute(
-                "SELECT store, date, total, currency FROM scans WHERE total IS NOT NULL AND UPPER(currency) = UPPER(?)",
+                "SELECT store, date, total, currency, category FROM scans WHERE total IS NOT NULL AND UPPER(currency) = UPPER(?)",
                 (currency,),
             ).fetchall()
             scan_count = conn.execute(
@@ -106,23 +114,25 @@ def spending_analytics(currency: str | None = None) -> dict[str, Any]:
             ).fetchone()[0]
         else:
             rows = conn.execute(
-                "SELECT store, date, total, currency FROM scans WHERE total IS NOT NULL"
+                "SELECT store, date, total, currency, category FROM scans WHERE total IS NOT NULL"
             ).fetchall()
             scan_count = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
 
     total_spent = 0.0
     by_store: dict[str, float] = {}
     by_month: dict[str, float] = {}
+    by_category: dict[str, float] = {}
 
     for row in rows:
         store = row["store"] or "Unknown"
         total = row["total"] or 0.0
         date_str = row["date"] or ""
+        category = row["category"] or "other"
 
         total_spent += total
         by_store[store] = round(by_store.get(store, 0.0) + total, 2)
+        by_category[category] = round(by_category.get(category, 0.0) + total, 2)
 
-        # Try to extract YYYY-MM from various date formats
         month_key = _extract_month(date_str)
         if month_key:
             by_month[month_key] = round(by_month.get(month_key, 0.0) + total, 2)
@@ -133,6 +143,7 @@ def spending_analytics(currency: str | None = None) -> dict[str, Any]:
         "total_spent": round(total_spent, 2),
         "by_store": dict(sorted(by_store.items(), key=lambda x: -x[1])),
         "by_month": dict(sorted(by_month.items())),
+        "by_category": dict(sorted(by_category.items(), key=lambda x: -x[1])),
     }
 
 

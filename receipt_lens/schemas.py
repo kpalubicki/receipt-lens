@@ -17,6 +17,7 @@ class ReceiptData(BaseModel):
     total: float | None = None
     currency: str | None = None
     raw_text: str | None = None
+    category: str | None = None
 
 
 class ParseResponse(BaseModel):
@@ -35,6 +36,7 @@ class ScanSummary(BaseModel):
     currency: str | None
     confidence: str | None
     model: str | None
+    category: str | None = None
 
 
 class HistoryResponse(BaseModel):

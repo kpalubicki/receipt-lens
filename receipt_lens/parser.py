@@ -10,6 +10,7 @@ from io import BytesIO
 from PIL import Image
 import ollama
 
+from receipt_lens.categorize import categorize_receipt
 from receipt_lens.config import settings
 from receipt_lens.schemas import ReceiptData, ReceiptItem, ParseResponse
 
@@ -119,6 +120,9 @@ def parse_receipt(image_bytes: bytes) -> ParseResponse:
         if isinstance(item, dict)
     ]
 
+    item_names = [item.name for item in items]
+    category = categorize_receipt(data.get("store_name"), item_names)
+
     receipt = ReceiptData(
         store_name=data.get("store_name"),
         date=data.get("date"),
@@ -128,6 +132,7 @@ def parse_receipt(image_bytes: bytes) -> ParseResponse:
         total=data.get("total"),
         currency=data.get("currency"),
         raw_text=raw_text,
+        category=category,
     )
 
     return ParseResponse(
