@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from receipt_lens.config import settings
 from receipt_lens.history import budget_alert, delete_scan, get_scan, list_scans, save_scan, spending_analytics
 from receipt_lens.parser import parse_receipt
-from receipt_lens.pdf import generate_pdf
+from receipt_lens.pdf import generate_analytics_pdf, generate_pdf
 from receipt_lens.schemas import HistoryResponse, ParseResponse, ScanSummary
 
 SUPPORTED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
@@ -141,6 +141,31 @@ def get_analytics(currency: str | None = None) -> JSONResponse:
     """
     data = spending_analytics(currency=currency)
     return JSONResponse(content=data)
+
+
+@app.get("/analytics/report/pdf")
+def analytics_pdf_report(currency: str | None = None) -> Response:
+    """Return a PDF spending report derived from scan history.
+
+    Includes summary stats, spending by category, by store, and by month.
+    Optionally filter by ?currency=USD.
+    """
+    data = spending_analytics(currency=currency)
+    title = "Spending Report"
+    if currency:
+        title += f" ({currency.upper()})"
+    try:
+        pdf_bytes = generate_analytics_pdf(data, title=title)
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    filename = "spending-report.pdf"
+    if currency:
+        filename = f"spending-report-{currency.lower()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/analytics/budget-alert")

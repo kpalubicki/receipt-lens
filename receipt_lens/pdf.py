@@ -118,3 +118,68 @@ def generate_pdf(result: ParseResponse) -> bytes:
     pdf.cell(0, 5, f"Confidence: {result.confidence.upper()}   |   Model: {result.model}", align="C")
 
     return bytes(pdf.output())
+
+
+def generate_analytics_pdf(data: dict, title: str = "Spending Report") -> bytes:
+    """Render spending analytics as a PDF report."""
+    try:
+        from fpdf import FPDF
+    except ImportError as exc:
+        raise ImportError("PDF export requires 'fpdf2'. Install it with: pip install fpdf2") from exc
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    usable_w = pdf.w - pdf.l_margin - pdf.r_margin
+
+    def _section(label: str) -> None:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_fill_color(50, 50, 50)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 9, label, fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(1)
+
+    def _table_row(left: str, right: str, bold: bool = False) -> None:
+        pdf.set_font("Helvetica", "B" if bold else "", 9)
+        pdf.set_text_color(30, 30, 30)
+        pdf.cell(usable_w * 0.7, 6, left, border="B")
+        pdf.cell(usable_w * 0.3, 6, right, border="B", align="R", new_x="LMARGIN", new_y="NEXT")
+
+    # Header
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_fill_color(30, 30, 30)
+    pdf.set_text_color(255, 255, 255)
+    pdf.multi_cell(0, 13, title, fill=True, align="C")
+    pdf.ln(4)
+
+    # Summary
+    _section("Summary")
+    _table_row("Total receipts scanned", str(data.get("scan_count", 0)))
+    _table_row("Receipts with totals", str(data.get("receipts_with_total", 0)))
+    _table_row("Total spent", f"{data.get('total_spent', 0.0):.2f}", bold=True)
+    pdf.ln(5)
+
+    # By category
+    by_category = data.get("by_category", {})
+    if by_category:
+        _section("By Category")
+        for category, total in by_category.items():
+            _table_row(category.capitalize(), f"{total:.2f}")
+        pdf.ln(5)
+
+    # By store
+    by_store = data.get("by_store", {})
+    if by_store:
+        _section("By Store")
+        for store, total in list(by_store.items())[:15]:  # cap at 15 to avoid pagination issues
+            _table_row(store, f"{total:.2f}")
+        pdf.ln(5)
+
+    # By month
+    by_month = data.get("by_month", {})
+    if by_month:
+        _section("By Month")
+        for month, total in by_month.items():
+            _table_row(month, f"{total:.2f}")
+
+    return bytes(pdf.output())

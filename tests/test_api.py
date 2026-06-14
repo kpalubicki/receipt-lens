@@ -391,3 +391,51 @@ def test_budget_alert_currency_filter(tmp_path, monkeypatch):
     r = client.get("/analytics/budget-alert?threshold=100&currency=EUR")
     data = r.json()
     assert data["ok"] is True
+
+
+# --- /analytics/report/pdf tests ---
+
+def test_analytics_pdf_empty_history(tmp_path, monkeypatch):
+    monkeypatch.setattr("receipt_lens.history.settings",
+                        type("S", (), {"history_db": str(tmp_path / "h.db")})())
+    from receipt_lens import history as h
+    h._ensure_table(h._conn())
+    r = client.get("/analytics/report/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"
+
+
+def test_analytics_pdf_with_data(tmp_path, monkeypatch):
+    db = str(tmp_path / "h.db")
+    monkeypatch.setattr("receipt_lens.history.settings",
+                        type("S", (), {"history_db": db})())
+    from receipt_lens import history as h
+    conn = h._conn()
+    h._ensure_table(conn)
+    conn.execute(
+        "INSERT INTO scans (filename, scanned_at, store, date, total, currency, category, confidence, model, data) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("r.jpg", "2026-01-01", "Walmart", "2026-01-15", 45.50, "USD", "groceries", "high", "llava", "{}")
+    )
+    conn.commit()
+    r = client.get("/analytics/report/pdf")
+    assert r.status_code == 200
+    assert r.content[:4] == b"%PDF"
+    assert 'attachment; filename="spending-report.pdf"' in r.headers["content-disposition"]
+
+
+def test_analytics_pdf_currency_filter_filename(tmp_path, monkeypatch):
+    monkeypatch.setattr("receipt_lens.history.settings",
+                        type("S", (), {"history_db": str(tmp_path / "h.db")})())
+    from receipt_lens import history as h
+    h._ensure_table(h._conn())
+    r = client.get("/analytics/report/pdf?currency=EUR")
+    assert r.status_code == 200
+    assert "spending-report-eur.pdf" in r.headers["content-disposition"]
+
+
+def test_analytics_pdf_501_when_fpdf2_missing():
+    with patch("receipt_lens.main.generate_analytics_pdf", side_effect=ImportError("fpdf2 not installed")):
+        r = client.get("/analytics/report/pdf")
+    assert r.status_code == 501
+    assert "fpdf2" in r.json()["detail"]
